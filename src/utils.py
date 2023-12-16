@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Tuple, Union
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from darts.utils.utils import ModelMode, SeasonalityMode, TrendMode
 
 
 def read_json_as_dict(input_path: str) -> Dict:
@@ -199,60 +198,17 @@ def make_serializable(obj: Any) -> Union[int, float, List[Union[int, float]], An
 
 
 def process_hyperparameters(hyperparameters: dict, forecast_length: int) -> dict:
-    valid_parameters = {
-        "history_length",
-        "lags",
-        "lags_past_covariates",
-        "lags_future_covariates",
-        "output_chunk_length",
-        "n_estimators",
-        "max_depth",
-        "random_state",
-        "multi_models",
-        "criterion",
-        "min_samples_split",
-        "min_samples_leaf",
-        "min_weight_fraction_leaf",
-        "max_features",
-        "max_leaf_nodes",
-        "min_impurity_decrease",
-        "bootstrap",
-        "oob_score",
-        "n_jobs",
-        "verbose",
-        "warm_start",
-        "ccp_alpha",
-        "max_samples",
-    }
-
-    if hyperparameters.get("history_forecast_ratio"):
-        history_forecast_ratio = hyperparameters["history_forecast_ratio"]
-        history_length = forecast_length * history_forecast_ratio
-        hyperparameters["history_length"] = history_length
-
-    if hyperparameters.get("lags_forecast_ratio"):
-        lags_forecast_ratio = hyperparameters["lags_forecast_ratio"]
-        lags = lags_forecast_ratio * forecast_length
-        hyperparameters["lags"] = lags
-        hyperparameters["lags_past_covariates"] = lags
-        hyperparameters["lags_future_covariates"] = (lags, 1)
-
-    if not hyperparameters.get("output_chunk_length"):
-        hyperparameters["output_chunk_length"] = forecast_length
-
-    if hyperparameters.get("lags_future_covariates_x") and hyperparameters.get(
-        "lags_future_covariates_x"
-    ):
+    x = None
+    y = None
+    if "lags_future_covariates_x" in hyperparameters.keys():
         x = hyperparameters.get("lags_future_covariates_x")
+    if "lags_future_covariates_y" in hyperparameters.keys():
         y = hyperparameters.get("lags_future_covariates_y")
-        hyperparameters["lags_future_covariates"] = (x, y)
 
-    to_remove = []
-    for k in hyperparameters.keys():
-        if k not in valid_parameters:
-            to_remove.append(k)
+    x_y = (x, y)
 
-    for k in to_remove:
-        hyperparameters.pop(k)
+    hyperparameters.pop("lags_future_covariates_x")
+    hyperparameters.pop("lags_future_covariates_y")
+    hyperparameters["lags_future_covariates"] = x_y
 
     return hyperparameters

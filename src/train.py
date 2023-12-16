@@ -1,7 +1,6 @@
 import argparse
 from config import paths
 from data_models.data_validator import validate_data
-from hyperparameter_tuning.tuner import tune_hyperparameters
 from logger import get_logger, log_error
 from prediction.predictor_model import (
     evaluate_predictor_model,
@@ -85,7 +84,10 @@ def run_training(
         )
 
         testing_dataframe = None
-        if data_schema.future_covariates:
+        if data_schema.future_covariates or data_schema.time_col_dtype in [
+            "DATE",
+            "DATETIME",
+        ]:
             testing_dataframe = read_csv_in_directory(paths.TEST_DIR)
 
         forecaster = train_predictor_model(

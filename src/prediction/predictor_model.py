@@ -8,6 +8,7 @@ from darts.models.forecasting.xgboost import XGBModel
 from darts import TimeSeries
 from schema.data_schema import ForecastingSchema
 from sklearn.exceptions import NotFittedError
+from sklearn.preprocessing import MinMaxScaler
 
 warnings.filterwarnings("ignore")
 
@@ -27,6 +28,8 @@ class Forecaster:
     def __init__(
         self,
         data_schema: ForecastingSchema,
+        history_forecast_ratio: int = None,
+        lags_forecast_ratio: int = None,
         lags: Union[int, List[int], Dict[str, Union[int, List[int]]], None] = None,
         lags_past_covariates: Union[
             int, List[int], Dict[str, Union[int, List[int]]], None
@@ -36,11 +39,12 @@ class Forecaster:
             List[int],
             Dict[str, Union[Tuple[int, int], List[int]]],
             None,
-        ] = (5, 1),
+        ] = None,
         output_chunk_length: int = None,
         n_estimators: int = 100,
         max_depth: int = 5,
         multi_models: Optional[bool] = True,
+        use_exogenous: bool = True,
         random_state: int = 0,
         **kwargs,
     ):
@@ -94,20 +98,39 @@ class Forecaster:
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.multi_models = multi_models
+        self.use_exogenous = use_exogenous
         self.random_state = random_state
         self._is_trained = False
         self.kwargs = kwargs
 
-        if not data_schema.past_covariates:
-            self.lags_past_covariates = None
+        if history_forecast_ratio:
+            self.history_length = (
+                self.data_schema.forecast_length * history_forecast_ratio
+            )
+        if lags_forecast_ratio:
+            lags = self.data_schema.forecast_length * lags_forecast_ratio
+            self.lags = lags
 
-        if not data_schema.future_covariates:
+            if self.data_schema.past_covariates and not self.lags_past_covariates:
+                self.lags_past_covariates = lags
+
+            if data_schema.future_covariates or data_schema.time_col_dtype in [
+                "DATE",
+                "DATETIME",
+            ]:
+                x, y = lags_future_covariates
+                if not x:
+                    x = lags
+                if not y:
+                    y = self.data_schema.forecast_length
+                self.lags_future_covariates = (x, y)
+
+        if not self.use_exogenous:
+            self.lags_past_covariates = None
             self.lags_future_covariates = None
 
-        self.history_length = None
-        if kwargs.get("history_length"):
-            self.history_length = kwargs["history_length"]
-            kwargs.pop("history_length")
+        if not self.output_chunk_length:
+            self.output_chunk_length = self.data_schema.forecast_length
 
         self.model = XGBModel(
             lags=self.lags,
@@ -125,7 +148,6 @@ class Forecaster:
         self,
         history: pd.DataFrame,
         data_schema: ForecastingSchema,
-        history_length: int = None,
         test_dataframe: pd.DataFrame = None,
     ) -> pd.DataFrame:
         """
@@ -143,6 +165,23 @@ class Forecaster:
         past = []
         future = []
 
+        future_covariates_names = data_schema.future_covariates
+        if data_schema.time_col_dtype in ["DATE", "DATETIME"]:
+            date_col = pd.to_datetime(history[data_schema.time_col])
+            year_col = date_col.dt.year
+            month_col = date_col.dt.month
+            year_col_name = f"{data_schema.time_col}_year"
+            month_col_name = f"{data_schema.time_col}_month"
+            history[year_col_name] = year_col
+            history[month_col_name] = month_col
+            future_covariates_names += [year_col_name, month_col_name]
+
+            date_col = pd.to_datetime(test_dataframe[data_schema.time_col])
+            year_col = date_col.dt.year
+            month_col = date_col.dt.month
+            test_dataframe[year_col_name] = year_col
+            test_dataframe[month_col_name] = month_col
+
         groups_by_ids = history.groupby(data_schema.id_col)
         all_ids = list(groups_by_ids.groups.keys())
         all_series = [
@@ -151,21 +190,38 @@ class Forecaster:
         ]
 
         self.all_ids = all_ids
-
-        for s in all_series:
-            if history_length:
+        scalers = {}
+        for index, s in enumerate(all_series):
+            if self.history_length:
                 s = s.iloc[-self.history_length :]
             s.reset_index(inplace=True)
+
+            past_scaler = MinMaxScaler()
+            scaler = MinMaxScaler()
+            s[data_schema.target] = scaler.fit_transform(
+                s[data_schema.target].values.reshape(-1, 1)
+            )
+
+            scalers[index] = scaler
+
             target = TimeSeries.from_dataframe(s, value_cols=data_schema.target)
             targets.append(target)
 
             if data_schema.past_covariates:
+                original_values = (
+                    s[data_schema.past_covariates].values.reshape(-1, 1)
+                    if len(data_schema.past_covariates) == 1
+                    else s[data_schema.past_covariates].values
+                )
+                s[data_schema.past_covariates] = past_scaler.fit_transform(
+                    original_values
+                )
                 past_covariates = TimeSeries.from_dataframe(
                     s[data_schema.past_covariates]
                 )
                 past.append(past_covariates)
 
-        if data_schema.future_covariates:
+        if future_covariates_names:
             test_groups_by_ids = test_dataframe.groupby(data_schema.id_col)
             test_all_series = [
                 test_groups_by_ids.get_group(id_).drop(columns=data_schema.id_col)
@@ -173,19 +229,31 @@ class Forecaster:
             ]
 
             for train_series, test_series in zip(all_series, test_all_series):
-                if history_length:
+                if self.history_length:
                     train_series = train_series.iloc[-self.history_length :]
-                    test_series = test_series.iloc[-self.history_length :]
 
-                train_future_covariates = train_series[data_schema.future_covariates]
-                test_future_covariates = test_series[data_schema.future_covariates]
+                train_future_covariates = train_series[future_covariates_names]
+                test_future_covariates = test_series[future_covariates_names]
                 future_covariates = pd.concat(
                     [train_future_covariates, test_future_covariates], axis=0
                 )
+
                 future_covariates.reset_index(inplace=True)
-                future_covariates = TimeSeries.from_dataframe(future_covariates)
+                future_scaler = MinMaxScaler()
+                original_values = (
+                    future_covariates[future_covariates_names].values.reshape(-1, 1)
+                    if len(future_covariates_names) == 1
+                    else future_covariates[future_covariates_names].values
+                )
+                future_covariates[
+                    future_covariates_names
+                ] = future_scaler.fit_transform(original_values)
+                future_covariates = TimeSeries.from_dataframe(
+                    future_covariates[future_covariates_names]
+                )
                 future.append(future_covariates)
 
+        self.scalers = scalers
         if not past:
             past = None
         if not future:
@@ -196,7 +264,6 @@ class Forecaster:
         self,
         history: pd.DataFrame,
         data_schema: ForecastingSchema,
-        history_length: int = None,
         test_dataframe: pd.DataFrame = None,
     ) -> None:
         """Fit the Forecaster to the training data.
@@ -206,16 +273,18 @@ class Forecaster:
         Args:
             history (pandas.DataFrame): The features of the training data.
             data_schema (ForecastingSchema): The schema of the training data.
-            history_length (int): The length of the series used for training.
             test_dataframe (pd.DataFrame): The testing data (needed only if the data contains future covariates).
         """
         np.random.seed(self.random_state)
         targets, past_covariates, future_covariates = self._prepare_data(
             history=history,
-            history_length=history_length,
             data_schema=data_schema,
             test_dataframe=test_dataframe,
         )
+
+        if not self.use_exogenous:
+            past_covariates = None
+            future_covariates = None
 
         self.model.fit(
             targets,
@@ -249,9 +318,10 @@ class Forecaster:
             future_covariates=self.future_covariates,
         )
         prediction_values = []
-        for prediction in predictions:
+        for index, prediction in enumerate(predictions):
             prediction = prediction.pd_dataframe()
             values = prediction.values
+            values = self.scalers[index].inverse_transform(values)
             prediction_values += list(values)
 
         test_data[prediction_col_name] = np.array(prediction_values)
@@ -310,7 +380,6 @@ def train_predictor_model(
     model.fit(
         history=history,
         data_schema=data_schema,
-        history_length=model.history_length,
         test_dataframe=testing_dataframe,
     )
     return model
