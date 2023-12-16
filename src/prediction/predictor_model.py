@@ -60,10 +60,11 @@ class Forecaster:
                 For example, if the forecast horizon is 20 and the history_forecast_ratio is 10,
                 history length will be 20*10 = 200 samples.
 
-
             lags_forecast_ratio (int):
-                Sets the input_chunk_length and output_chunk_length parameters depending on the forecast horizon.
-                input_chunk_length = forecast horizon * lags_forecast_ratio
+                Sets the lags parameters depending on the forecast horizon.
+                lags = lags_past_covariates = forecast horizon * lags_forecast_ratio
+                lags_future_covariates = (lags, forecast horizon)
+                This parameters overides lags parameters.
 
             lags (Union[int, List[int], Dict[str, Union[int, List[int]]], None]):
                 Lagged target series values used to predict the next time step/s.
@@ -92,6 +93,7 @@ class Forecaster:
               It is not the same as forecast horizon n used in predict(), which is the desired number of prediction points generated using a one-shot- or auto-regressive forecast.
               Setting n <= output_chunk_length prevents auto-regression. This is useful when the covariates don't extend far enough into the future,
               or to prohibit the model from using future values of past and / or future covariates for prediction (depending on the model's covariate support).
+              If not set, the forecast horizon will be used.
 
             n_estimators (int): The number of trees in the forest.
 
