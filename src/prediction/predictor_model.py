@@ -52,6 +52,19 @@ class Forecaster:
 
         Args:
 
+            data_schema (ForecastingSchema):
+                Schema of training data.
+
+            history_forecast_ratio (int):
+                Sets the history length depending on the forecast horizon.
+                For example, if the forecast horizon is 20 and the history_forecast_ratio is 10,
+                history length will be 20*10 = 200 samples.
+
+
+            lags_forecast_ratio (int):
+                Sets the input_chunk_length and output_chunk_length parameters depending on the forecast horizon.
+                input_chunk_length = forecast horizon * lags_forecast_ratio
+
             lags (Union[int, List[int], Dict[str, Union[int, List[int]]], None]):
                 Lagged target series values used to predict the next time step/s.
                 If an integer, must be > 0. Uses the last n=lags past lags; e.g. (-1, -2, …, -lags),
@@ -88,6 +101,9 @@ class Forecaster:
                 If True, a separate model will be trained for each future lag to predict.
                 If False, a single model is trained to predict at step 'output_chunk_length' in the future. Default: True.
 
+            use_exogenous (bool):
+                Indicated if past covariates are used or not.
+
             random_state (int): Sets the underlying random seed at model initialization time.
         """
         self.data_schema = data_schema
@@ -118,12 +134,11 @@ class Forecaster:
                 "DATE",
                 "DATETIME",
             ]:
-                x, y = lags_future_covariates
-                if not x:
-                    x = lags
-                if not y:
-                    y = self.data_schema.forecast_length
-                self.lags_future_covariates = (x, y)
+                if not self.lags_future_covariates:
+                    self.lags_future_covariates = (
+                        lags,
+                        self.data_schema.forecast_length,
+                    )
 
         if not self.use_exogenous:
             self.lags_past_covariates = None
