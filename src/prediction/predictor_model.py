@@ -285,7 +285,6 @@ class Forecaster:
         if not self.use_exogenous:
             past_covariates = None
             future_covariates = None
-
         self.model.fit(
             targets,
             past_covariates=past_covariates,

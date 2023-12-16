@@ -205,7 +205,10 @@ def process_hyperparameters(hyperparameters: dict, forecast_length: int) -> dict
     if "lags_future_covariates_y" in hyperparameters.keys():
         y = hyperparameters.get("lags_future_covariates_y")
 
-    x_y = (x, y)
+    if not x and not y:
+        x_y = None
+    else:
+        x_y = (x, y)
 
     hyperparameters.pop("lags_future_covariates_x")
     hyperparameters.pop("lags_future_covariates_y")
