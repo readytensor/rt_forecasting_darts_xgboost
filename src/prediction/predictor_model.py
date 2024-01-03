@@ -130,18 +130,18 @@ class Forecaster:
             lags = self.data_schema.forecast_length * lags_forecast_ratio
             self.lags = lags
 
-            if self.data_schema.past_covariates and not self.lags_past_covariates:
+            if use_exogenous and self.data_schema.past_covariates:
                 self.lags_past_covariates = lags
 
-            if data_schema.future_covariates or data_schema.time_col_dtype in [
-                "DATE",
-                "DATETIME",
-            ]:
-                if not self.lags_future_covariates:
-                    self.lags_future_covariates = (
-                        lags,
-                        self.data_schema.forecast_length,
-                    )
+        if (
+            use_exogenous
+            and not lags_future_covariates
+            and (
+                self.data_schema.future_covariates
+                or self.data_schema.time_col_dtype in ["DATE", "DATETIME"]
+            )
+        ):
+            self.lags_future_covariates = list(range(0, data_schema.forecast_length))
 
         if not self.use_exogenous:
             self.lags_past_covariates = None
