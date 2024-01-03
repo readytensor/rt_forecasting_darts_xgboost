@@ -165,6 +165,7 @@ class Forecaster:
         self,
         history: pd.DataFrame,
         data_schema: ForecastingSchema,
+        history_length: int = None,
         test_dataframe: pd.DataFrame = None,
     ) -> pd.DataFrame:
         """
@@ -209,7 +210,7 @@ class Forecaster:
         self.all_ids = all_ids
         scalers = {}
         for index, s in enumerate(all_series):
-            if self.history_length:
+            if history_length:
                 s = s.iloc[-self.history_length :]
             s.reset_index(inplace=True)
 
@@ -220,8 +221,18 @@ class Forecaster:
             )
 
             scalers[index] = scaler
+            static_covariates = None
+            if self.use_exogenous and self.data_schema.static_covariates:
+                static_covariates = s[self.data_schema.static_covariates]
 
-            target = TimeSeries.from_dataframe(s, value_cols=data_schema.target)
+            target = TimeSeries.from_dataframe(
+                s,
+                value_cols=data_schema.target,
+                static_covariates=static_covariates.iloc[0]
+                if static_covariates is not None
+                else None,
+            )
+
             targets.append(target)
 
             if data_schema.past_covariates:
@@ -246,7 +257,7 @@ class Forecaster:
             ]
 
             for train_series, test_series in zip(all_series, test_all_series):
-                if self.history_length:
+                if history_length:
                     train_series = train_series.iloc[-self.history_length :]
 
                 train_future_covariates = train_series[future_covariates_names]
@@ -275,6 +286,7 @@ class Forecaster:
             past = None
         if not future:
             future = None
+
         return targets, past, future
 
     def fit(
@@ -302,6 +314,7 @@ class Forecaster:
         if not self.use_exogenous:
             past_covariates = None
             future_covariates = None
+
         self.model.fit(
             targets,
             past_covariates=past_covariates,
