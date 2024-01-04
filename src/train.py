@@ -13,6 +13,7 @@ from utils import (
     read_json_as_dict,
     set_seeds,
     process_hyperparameters,
+    Timer,
 )
 
 logger = get_logger(task_name="train")
@@ -90,12 +91,13 @@ def run_training(
         ]:
             testing_dataframe = read_csv_in_directory(paths.TEST_DIR)
 
-        forecaster = train_predictor_model(
-            history=validated_data,
-            data_schema=data_schema,
-            hyperparameters=default_hyperparameters,
-            testing_dataframe=testing_dataframe,
-        )
+        with Timer(logger) as _:
+            forecaster = train_predictor_model(
+                history=validated_data,
+                data_schema=data_schema,
+                hyperparameters=default_hyperparameters,
+                testing_dataframe=testing_dataframe,
+            )
 
         # save predictor model
         logger.info("Saving forecaster...")
