@@ -166,7 +166,6 @@ class Forecaster:
         self,
         history: pd.DataFrame,
         data_schema: ForecastingSchema,
-        history_length: int = None,
     ) -> Tuple[List, List, List]:
         """
         Puts the data into the expected shape by the forecaster.
@@ -175,7 +174,7 @@ class Forecaster:
         Args:
             history (pd.DataFrame): The provided training data.
             data_schema (ForecastingSchema): The schema of the training data.
-            history_length (int): The number of historical timesteps to be considered.
+
 
         Returns:
             Tuple[List, List, List]: Target, Past covariates and Future covariates.
@@ -208,7 +207,7 @@ class Forecaster:
         self.all_ids = all_ids
         scalers = {}
         for index, s in enumerate(all_series):
-            if history_length:
+            if self.history_length:
                 s = s.iloc[-self.history_length :]
             s.reset_index(inplace=True)
 
@@ -250,7 +249,7 @@ class Forecaster:
         future_scalers = {}
         if future_covariates_names:
             for id, train_series in zip(all_ids, all_series):
-                if history_length:
+                if self.history_length:
                     train_series = train_series.iloc[-self.history_length :]
 
                 future_covariates = train_series[future_covariates_names]
@@ -356,7 +355,6 @@ class Forecaster:
         self,
         history: pd.DataFrame,
         data_schema: ForecastingSchema,
-        history_length: int = None,
     ) -> None:
         """Fit the Forecaster to the training data.
         A separate LinearRegression model is fit to each series that is contained
@@ -365,12 +363,11 @@ class Forecaster:
         Args:
             history (pandas.DataFrame): The features of the training data.
             data_schema (ForecastingSchema): The schema of the training data.
-            history_length (int): The length of the series used for training.
+
         """
         np.random.seed(self.random_state)
         targets, past_covariates, future_covariates = self._prepare_data(
             history=history,
-            history_length=history_length,
             data_schema=data_schema,
         )
 
