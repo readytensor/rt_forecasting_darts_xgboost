@@ -43,7 +43,7 @@ class Forecaster:
         output_chunk_length: int = None,
         n_estimators: int = 100,
         max_depth: int = 5,
-        multi_models: Optional[bool] = True,
+        multi_models: Optional[bool] = False,
         use_exogenous: bool = True,
         random_state: int = 0,
         **kwargs,
