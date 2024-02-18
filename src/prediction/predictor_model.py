@@ -9,11 +9,14 @@ from darts import TimeSeries
 from schema.data_schema import ForecastingSchema
 from sklearn.exceptions import NotFittedError
 from sklearn.preprocessing import MinMaxScaler
+from logger import get_logger
 
 warnings.filterwarnings("ignore")
 
 
 PREDICTOR_FILE_NAME = "predictor.joblib"
+
+logger = get_logger(task_name="model")
 
 
 class Forecaster:
@@ -150,18 +153,6 @@ class Forecaster:
         if not self.output_chunk_length:
             self.output_chunk_length = self.data_schema.forecast_length
 
-        self.model = XGBModel(
-            lags=self.lags,
-            lags_past_covariates=self.lags_past_covariates,
-            lags_future_covariates=self.lags_future_covariates,
-            output_chunk_length=self.output_chunk_length,
-            n_estimators=self.n_estimators,
-            max_depth=self.max_depth,
-            random_state=self.random_state,
-            multi_models=self.multi_models,
-            **kwargs,
-        )
-
     def _prepare_data(
         self,
         history: pd.DataFrame,
@@ -225,9 +216,9 @@ class Forecaster:
             target = TimeSeries.from_dataframe(
                 s,
                 value_cols=data_schema.target,
-                static_covariates=static_covariates.iloc[0]
-                if static_covariates is not None
-                else None,
+                static_covariates=(
+                    static_covariates.iloc[0] if static_covariates is not None else None
+                ),
             )
 
             targets.append(target)
@@ -261,9 +252,9 @@ class Forecaster:
                     if len(future_covariates_names) == 1
                     else future_covariates[future_covariates_names].values
                 )
-                future_covariates[
-                    future_covariates_names
-                ] = future_scaler.fit_transform(original_values)
+                future_covariates[future_covariates_names] = (
+                    future_scaler.fit_transform(original_values)
+                )
 
                 future_covariates = TimeSeries.from_dataframe(
                     future_covariates[future_covariates_names]
@@ -351,6 +342,31 @@ class Forecaster:
 
         return future
 
+    def _validate_lags_and_history_length(self, series_length: int):
+        """
+        Validate the value of lags and that history length is at least double the forecast horizon.
+        If the provided lags value is invalid (too large), lags are set to the largest possible value.
+
+        Args:
+            series_length (int): The length of the history.
+
+        Returns: None
+        """
+        forecast_length = self.data_schema.forecast_length
+        if series_length < 2 * forecast_length:
+            raise ValueError(
+                f"Training series is too short. History should be at least double the forecast horizon. history_length = ({series_length}), forecast horizon = ({self.data_schema.forecast_length})"
+            )
+
+        if self.lags > series_length - forecast_length:
+            self.lags = series_length - forecast_length
+            logger.warning(
+                "The provided lags value is greater than the available history length."
+                f" Lags are set to to (history length - forecast horizon - 1) = {self.lags}"
+            )
+            if self.lags_past_covariates:
+                self.lags_past_covariates = self.lags
+
     def fit(
         self,
         history: pd.DataFrame,
@@ -369,6 +385,20 @@ class Forecaster:
         targets, past_covariates, future_covariates = self._prepare_data(
             history=history,
             data_schema=data_schema,
+        )
+
+        self._validate_lags_and_history_length(series_length=len(targets[0]))
+
+        self.model = XGBModel(
+            lags=self.lags,
+            lags_past_covariates=self.lags_past_covariates,
+            lags_future_covariates=self.lags_future_covariates,
+            output_chunk_length=self.output_chunk_length,
+            n_estimators=self.n_estimators,
+            max_depth=self.max_depth,
+            random_state=self.random_state,
+            multi_models=self.multi_models,
+            **self.kwargs,
         )
 
         self.model.fit(
@@ -511,20 +541,3 @@ def load_predictor_model(predictor_dir_path: str) -> Forecaster:
         Forecaster: A new instance of the loaded Forecaster model.
     """
     return Forecaster.load(predictor_dir_path)
-
-
-def evaluate_predictor_model(
-    model: Forecaster, x_test: pd.DataFrame, y_test: pd.Series
-) -> float:
-    """
-    Evaluate the Forecaster model and return the accuracy.
-
-    Args:
-        model (Forecaster): The Forecaster model.
-        x_test (pd.DataFrame): The features of the test data.
-        y_test (pd.Series): The labels of the test data.
-
-    Returns:
-        float: The accuracy of the Forecaster model.
-    """
-    return model.evaluate(x_test, y_test)
